@@ -1,4 +1,3 @@
-
 #include <HGUI.au3>
 
 
@@ -34,10 +33,12 @@ $btn = _GUICtrlCreateButton("Button with box", 40, 250, 250, 50)
 $box = _GUICtrlCreateBox(40, 250, 250, 50, 0xFFFFFF) ; x, y, w, h, color
 _GUICtrlSetAttach($btn, $box) ; hover button will also hover the box
 
+;~ _GUICtrlCreatePic($filepath [or url], $x, $y, $w = -1, $h = -1, $scale = -1, $fit = -1, $isHover = true)
+; $scale: to scale image, 1 is normal size, 0.5 is half. If this is set, $w and $h will be ignored
+; $fit: to fit image into an area, 1 is fit, 2 is fit and crop. If this is set, $scale will be ignored
+$pic = _GUICtrlCreatePic("https://i.kym-cdn.com/entries/icons/original/000/013/564/doge.jpg", 320, 250, 200, 100, -1, 1)
 
 $btn2 = _GUICtrlCreateButton("Button attached to picture", 40, 320, 250, 50, 0x11CC11) ; red color
-$pic = _GUICtrlCreatePic("c:\Program Files (x86)\AutoIt3\Examples\GUI\Torus.png", 320, 250)
-
 _GUICtrlSetAttach($btn2, $pic) ; hover button will also hover the picture, but hover the picture does not hover the button
 
 GUISetState()
