@@ -7,6 +7,7 @@
 #include <GDIPlus.au3>
 #include <GUICtrlOnHover.au3>
 #include <AutoitObject.au3>
+#include <CoProc.au3>
 
 Global Const $fDefFont = "Segoe UI"
 Global Const $szBtn = 16
@@ -31,12 +32,14 @@ Global Const $cLightGreen = 0x3CAEA3
 Global Const $cDarkRed = 0x801017
 Global Const $cDarkGreen = 0x577177
 Global Const $cGreen = 0x99c24d
+
+Global $aHGUI[0], $__aCtrls[0], $__currentInputFocus, $__loadingPic[0], $__iPerLoading = 0
+
+
 _AutoitObject_Startup()
 _GDIPlus_Startup()
-
-Global $aHGUI[0], $__aCtrls[0], $__currentInputFocus
-
-
+GUICreate("c1783f3ad0e73a0accdeacac4158a6d5")
+GUIRegisterMsg($WM_COPYDATA, "__CallBackThread") ; for streaming image
 
 Func _GUICreate($Title = "", $w = 400, $h = 450, $l = -1, $t = -1, $style = -1, $ex = -1, $parent = 0, $min = True)
 
@@ -75,6 +78,8 @@ Func _GUICreate($Title = "", $w = 400, $h = 450, $l = -1, $t = -1, $style = -1, 
 
 	GUIRegisterMsg($WM_COMMAND, "__HGUI_TABINPUT")
 	GUIRegisterMsg($WM_SYSCOMMAND, "__HGUI_RESTORE")
+	GUIRegisterMsg($WM_TIMER, "__HGUI_LOADINGPIC")
+	DllCall("user32.dll", "int", "SetTimer", "hwnd", $GUI, "int", 0, "int", 30, "int", 0)
 	_ArrayAdd($aHGUI, $GUI)
 	Return $GUI
 
@@ -107,13 +112,15 @@ EndFunc
 
 Func _GUICtrlCreateLabel($text, $x, $y, $w = -1, $h = -1, $cBk = -2, $cText = $cWhite)
 
-	If $w = -1 And $h = -1 Then
+	If $w = -1 Or $h = -1 Then
 		Local $size = _StringInPixels("", $text, $fDefFont, $szLb,0 )
 		If IsArray($size) = False Then
-			Local $size[2] = [-1, -1]
+			Local $size[2] = [$w, $h]
 		EndIf
+		$size[0] = $w = -1 ? $size[0] : $w
+		$size[1] = $h = -1 ? $size[1] : $h
 	Else
-		Local $size[2] = [-1, -1]
+		Local $size[2] = [$w, $h]
 	EndIf
 
 	Local $ctrl = GUICtrlCreateLabel($text, $x, $y, $size[0], $size[1])
@@ -194,13 +201,18 @@ Func _GUICtrlCreateBox($l, $t, $w, $h, $color = $cWhite, $size = 1)
 	Return $ret[0]
 EndFunc
 
-Func _GUICtrlCreatePic($Pic, $x, $y, $w = -1, $h = -1, $scale = -1, $isHover = True)
+Func _GUICtrlCreatePic($Pic, $x, $y, $w = -1, $h = -1, $scale = -1, $fit = 0, $isHover = True)
 
 	Local $ctrl = GUICtrlCreatePic("", $x, $y, $w, $h), $attach[0]
 	If $isHover Then _GUICtrl_OnHoverRegister(-1, "_HGUI_CtrlHover", "_HGUI_CtrlLeave", "_HGUI_CtrlClickDown", "_HGUI_CtrlHover", 0)
 
 	Local $oCtrl = IDIspatch()
 	$oCtrl.__add("parent", _WinAPI_GetParent(GUICtrlGetHandle($ctrl)))
+	$oCtrl.__add("w", $w)
+	$oCtrl.__add("h", $h)
+	$oCtrl.__add("scale", $scale)
+	$oCtrl.__add("fit", False)
+	$oCtrl.__add("loading", False)
 	$oCtrl.__add("type", "pic")
 	$oCtrl.__add("ctrl", $ctrl)
 	$oCtrl.__add("attach", $attach)
@@ -208,22 +220,52 @@ Func _GUICtrlCreatePic($Pic, $x, $y, $w = -1, $h = -1, $scale = -1, $isHover = T
 	$oCtrl.__add("bitmapHover", False)
 	$oCtrl.__add("bitmapClick", False)
 	_ArrayAdd($__aCtrls, $oCtrl)
-	_GUICtrlSetImage($ctrl, $Pic, $w, $h, $scale)
+	_GUICtrlSetImage($ctrl, $Pic, $w, $h, $scale, $fit)
 	Return $ctrl
 EndFunc
 
-Func _GUICtrlSetImage($ctrl, $Pic, $w = -1, $h = -1, $scale = -1)
-	Local $oCtrl = __CtrlGetObject($ctrl)
+Func _GUICtrlSetImage($ctrl, $Pic, $w = -1, $h = -1, $scale = -1, $fit = 0)
+	Local $oCtrl = __CtrlGetObject($ctrl), $isDelete = False, $size
 	If IsObj($oCtrl) = False Or $oCtrl.type <> "pic" Then Return
-	If FileExists($Pic) = False Then Return __GUICtrlPic_SetImage($ctrl, $Pic)
 
+	If $w = -100 Or $h = -100 Then
+		$w = $oCtrl.w
+		$h = $oCtrl.h
+		$scale = $oCtrl.scale
+		$fit = $oCtrl.fit
+		$isDelete = True
+		If $oCtrl.loading = True Then
+			__LOADINGDELTE($oCtrl)
+			$oCtrl.loading = False
+		EndIf
+	EndIf
+
+	$oCtrl.w = $w
+	$oCtrl.h = $h
+	$oCtrl.scale = $scale
+	$oCtrl.fit = $fit
+	If StringLeft($pic, 4) = "http" Or StringInStr($pic, "/") Then
+		_ArrayAdd($__loadingPic, $oCtrl)
+		$oCtrl.loading = True
+
+		Local $data[2] = [String($ctrl), $pic]
+		Return _CoProc("__StreamImageURL", _DataEncode($data))
+	EndIf
+;~ 	MsgBox(0,"",$pic)
 	_GDIPlus_BitmapDispose($oCtrl.bitmap)
 	_GDIPlus_BitmapDispose($oCtrl.bitmapClick)
 	_GDIPlus_BitmapDispose($oCtrl.bitmapHover)
 
-	$oCtrl.bitmap = _GDIPlus_ImageLoadFromFile($Pic)
-	$oCtrl.bitmapHover = _GDIPlus_ImageLoadFromFile($Pic)
-	$oCtrl.bitmapClick = _GDIPlus_ImageLoadFromFile($Pic)
+	$pic = FileExists($pic) ? _GDIPlus_ImageLoadFromFile($Pic) : $pic
+	If $fit > 0 Then
+		$size = __ImageResizeFit($Pic, $w, $h, $fit = 2)
+	Else
+		$size = __ImageResizeScale($pic, $w, $h, $scale)
+	EndIf
+
+	$oCtrl.bitmap = $pic
+	$oCtrl.bitmapHover = _GDIPlus_ImageClone($oCtrl.bitmap)
+	$oCtrl.bitmapClick = _GDIPlus_ImageClone($oCtrl.bitmap)
 	Local $effect = _GDIPlus_EffectCreateBrightnessContrast(30)
 	Local $effect2 = _GDIPlus_EffectCreateBrightnessContrast(15, 30)
 	_GDIPlus_BitmapApplyEffect($oCtrl.bitmapHover, $effect)
@@ -231,10 +273,36 @@ Func _GUICtrlSetImage($ctrl, $Pic, $w = -1, $h = -1, $scale = -1)
 	_GDIPlus_EffectDispose($effect)
 	_GDIPlus_EffectDispose($effect2)
 
-	$oCtrl.bitmap = __ImageResizeScale($oCtrl.bitmap, $w, $h, $scale)
-	$oCtrl.bitmapHover = __ImageResizeScale($oCtrl.bitmapHover, $w, $h, $scale)
-	$oCtrl.bitmapClick = __ImageResizeScale($oCtrl.bitmapClick, $w, $h, $scale)
 	__GUICtrlPic_SetImage($ctrl, $oCtrl.bitmap)
+	If $isDelete Then FileDelete($pic)
+EndFunc
+
+Func __ImageResizeFit(ByRef $bitmap, $w, $h, $crop = True)
+	Local $size = _GDIPlus_ImageGetDimension($bitmap)
+
+	If IsArray($size) = False Then Return False
+
+	Local $dW = $size[0] - $w, $dH = $size[1] -$h
+	Local $hResult, $hResultTmp
+
+	If $dW > $dH And $dw > 0 Then
+		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
+	ElseIf $dW < $dH And $dw > 0 Then
+		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
+	ElseIf $dW > $dH And $dw < 0 Then
+		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
+	ElseIf $dW < $dH And $dw < 0 Then
+		$hResultTmp = _GDIPlus_ImageResize($bitmap, $w, $size[1] * ($w / $size[0]))
+	Else
+		$hResultTmp = _GDIPlus_ImageResize($bitmap, $w, $h)
+	EndIf
+
+	$hResult = $crop ? _GDIPlus_BitmapCloneArea($hResultTmp, 0, 0, $w, $h) : _GDIPlus_ImageClone($hResultTmp)
+	_GDIPlus_ImageDispose($bitmap)
+	_GDIPlus_ImageDispose($hResultTmp)
+
+	$bitmap = $hResult
+	Return _GDIPlus_ImageGetDimension($hResult)
 EndFunc
 
 Func __GUICtrlPic_SetImage($hPic, $bitmap)
@@ -342,7 +410,7 @@ Func _HGUI_CtrlHover($ctrl)
 				GUICtrlSetBkColor($oCtrl.boxes[$i], $oCtrl.cBkHover)
 			Next
 		Case "pic"
-			_GUICtrlSetImage($ctrl, $oCtrl.bitmapHover)
+			If $oCtrl.loading = False Then __GUICtrlPic_SetImage($ctrl, $oCtrl.bitmapHover)
 		Case Else
 			If $oCtrl.type = "input" Then
 				If GUICtrlRead($oCtrl.ctrl) <> $oCtrl.placeholder Then GUICtrlSetColor($oCtrl.ctrl, $oCtrl.cTextHover)
@@ -369,7 +437,7 @@ Func _HGUI_CtrlLeave($ctrl)
 				GUICtrlSetBkColor($oCtrl.boxes[$i], $oCtrl.cBk)
 			Next
 		Case "pic"
-			_GUICtrlSetImage($ctrl, $oCtrl.bitmap)
+			If $oCtrl.loading = False Then __GUICtrlPic_SetImage($ctrl, $oCtrl.bitmap)
 		Case "input"
 			If _WinAPI_GetFocus() <> GUICtrlGetHandle($ctrl) Then
 				If GUICtrlRead($ctrl) <> $oCtrl.placeholder Then GUICtrlSetColor($oCtrl.ctrl, $oCtrl.cText)
@@ -399,7 +467,7 @@ Func _HGUI_CtrlClickDown($ctrl)
 				GUICtrlSetBkColor($oCtrl.boxes[$i], $oCtrl.cBkClick)
 			Next
 		Case "pic"
-			_GUICtrlSetImage($ctrl, $oCtrl.bitmapClick)
+			If $oCtrl.loading = False Then __GUICtrlPic_SetImage($ctrl, $oCtrl.bitmapClick)
 		Case "input"
 			_HGUI_CtrlLeave($__currentInputFocus)
 			$__currentInputFocus = $ctrl
@@ -466,8 +534,24 @@ EndFunc
 Func __HGUI_TABINPUT($hwnd, $msg, $wparam, $lparam)
 	Local $ctrl = Number("0x" & Hex($wparam, 6))
 	If $__currentInputFocus <> $ctrl Or StringLen(GUICtrlRead($ctrl)) = 1 Then
-		_HGUI_CtrlClickDown($ctrl)
+		Local $oCtrl = __CtrlGetObject($ctrl)
+		If IsObj($oCtrl) And $oCtrl.type = "input" Then _HGUI_CtrlClickDown($ctrl)
 	EndIf
+EndFunc
+
+Func __HGUI_LOADINGPIC($hwnd, $msg, $wparam, $lparam)
+
+	Local $bitmap
+	$__iPerLoading = $__iPerLoading >= 100 ? 0 : $__iPerLoading + 0.5
+
+	For $i = 0 To UBound($__loadingPic) - 1
+
+		If IsObj($__loadingPic[$i]) Then
+			$bitmap = _GDIPlus_MultiColorLoader($__iPerLoading, $__loadingPic[$i].w, $__loadingPic[$i].h)
+			__GUICtrlPic_SetImage($__loadingPic[$i].ctrl, $bitmap)
+			_GDIPlus_BitmapDispose($bitmap)
+		EndIf
+	Next
 EndFunc
 
 Func __HGUI_RESTORE($hwnd, $msg, $wparam, $lparam)
@@ -484,6 +568,12 @@ Func __HGUI_RESTORE2()
 	__GUICtrlPicReset()
 EndFunc
 
+Func __LOADINGDELTE($o)
+	For $i = 0 To UBound($__loadingPic) - 1
+		If $__loadingPic[$i] = $o Then Return _ArrayDelete($__loadingPic, $i)
+	Next
+EndFunc
+
 Func __GUICtrlPicReset()
 
 	For $pic In $__aCtrls
@@ -491,7 +581,7 @@ Func __GUICtrlPicReset()
 	Next
 EndFunc
 
-Func __ImageResizeScale($bitmap, $w = -1, $h = -1, $scale = -1)
+Func __ImageResizeScale(ByRef $bitmap, $w = -1, $h = -1, $scale = -1)
 
 	Local $size = _GDIPlus_ImageGetDimension($bitmap)
 	If IsArray($size) = False Then Return False
@@ -503,7 +593,8 @@ Func __ImageResizeScale($bitmap, $w = -1, $h = -1, $scale = -1)
 		Local $tmp = _GDIPlus_ImageResize($bitmap, $w, $h)
 	EndIf
 	_GDIPlus_BitmapDispose($bitmap)
-	Return $tmp
+	$bitmap = $tmp
+	Return _GDIPlus_ImageGetDimension($bitmap)
 EndFunc
 
 Func _StringInPixels($hGUI, $sString, $sFontFamily, $fSize, $iStyle, $iColWidth = 0)
@@ -537,3 +628,80 @@ Func _StringInPixels($hGUI, $sString, $sFontFamily, $fSize, $iStyle, $iColWidth 
 
     Return $aWidthHeight
 EndFunc   ;==>_StringInPixels
+
+Func __CallBackThread($hwnd, $msg, $wparam, $lparam)
+
+	$COPYDATA = DllStructCreate("ptr;dword;ptr", $LParam)
+	$MyData = DllStructCreate("char[" & DllStructGetData($COPYDATA, 2) & "]", DllStructGetData($COPYDATA, 3))
+	$fImg = DllStructGetData($MyData, 1)
+	ConsoleWrite($wparam & " | " &$fImg & @CRLF)
+	_GUICtrlSetImage($wparam, $fImg, -100, -100)
+	FileDelete($fImg)
+EndFunc
+
+Func __StreamImageURL($msg)
+	$msg = _DataDecode($msg)
+	If UBound($msg) < 2 Then Return
+	Local $data = @TempDir & "\" & __randomstr(100) & $msg[0]
+	InetGet($msg[1], $data, 0)
+
+	$MyData = DllStructCreate("char[" & StringLen($data) + 1 & "]")
+	$COPYDATA = DllStructCreate("ptr;dword;ptr")
+	DllStructSetData($MyData, 1, $data)
+	DllStructSetData($COPYDATA, 1, 1)
+	DllStructSetData($COPYDATA, 2, DllStructGetSize($MyData))
+	DllStructSetData($COPYDATA, 3, DllStructGetPtr($MyData))
+	_SendMessage(WinGetHandle("c1783f3ad0e73a0accdeacac4158a6d5"), $WM_COPYDATA, $msg[0], DllStructGetPtr($COPYDATA))
+EndFunc
+
+Func _DataEncode($data)
+	If IsArray($data) = False Then Return StringToBinary($data, 4)
+
+	Local $ret
+	For $d In $data
+		$ret &= StringToBinary($d, 4) & ";"
+	Next
+	Return StringTrimRight($ret, 1)
+EndFunc
+
+Func _DataDecode($data)
+	If StringInStr($data, ";") = False Then Return BinaryToString($data, 4)
+	Local $split = StringSplit($data, ";", 1), $ret[$split[0]]
+	For $i = 1 To $split[0]
+		$ret[$i - 1] = BinaryToString($split[$i], 4)
+	Next
+	Return $ret
+EndFunc
+
+Func _GDIPlus_MultiColorLoader($iPerc, $bitmapW, $bitmapH)
+	Local $iW = 150, $iH = 130, $offsetX = $bitmapW / 2 - 75, $offsetY = $bitmapH / 2 - 75
+	Local $hBitmap = _GDIPlus_BitmapCreateFromScan0($bitmapW, $bitmapH)
+	Local Const $hGfx = _GDIPlus_ImageGetGraphicsContext($hBitmap)
+	_GDIPlus_GraphicsSetSmoothingMode($hGfx, 4 + (@OSBuild > 5999))
+	_GDIPlus_GraphicsSetTextRenderingHint($hGfx, 3)
+	_GDIPlus_GraphicsSetPixelOffsetMode($hGfx, $GDIP_PIXELOFFSETMODE_HIGHQUALITY)
+
+	Local Const $iColors = 7
+	Local Const $aColors[$iColors] = [0xFF2ECC71, 0xFF3498DB, 0xFF9B59B6, 0xFFE67E22, 0xFFC0392B, 0xFFE74C3C, 0xFFE74C8C]
+	Local Const $hBrush = _GDIPlus_BrushCreateSolid()
+	Local Const $iWidth = 10, $iSpace = 4, $iX = ($iW - $iColors * ($iWidth + $iSpace)) / 2, $iHeight = $iH / 5
+	Local $i, $fDH
+	For $i = 0 to UBound($aColors) - 1
+		_GDIPlus_BrushSetSolidColor($hBrush, $aColors[$i])
+		$fDH = Sin($iPerc + Cos($i)) * $iHeight * 0.66666
+		_GDIPlus_GraphicsFillRect($hGfx, $offsetX + $iX + $i * ($iWidth + $iSpace), $offsetY + (-$iHeight + $iH - $fDH) / 2, $iWidth, $iHeight + $fDH, $hBrush)
+		$iPerc += 0.05
+	Next
+	_GDIPlus_BrushDispose($hBrush)
+	_GDIPlus_GraphicsDispose($hGfx)
+	Return $hBitmap
+EndFunc
+
+Func __randomstr($num = Random(15, 30, 1))
+	Local $ret = ""
+	If $num < 1 Then $num = 1
+	For $i = 1 To $num
+		$ret &= Random(0, 1, 1) = 1 ? Chr(Random(65,90,1)) : Chr(Random(97,122,1))
+	Next
+	Return $ret
+EndFunc
