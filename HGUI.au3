@@ -282,22 +282,18 @@ Func __ImageResizeFit(ByRef $bitmap, $w, $h, $crop = True)
 
 	If IsArray($size) = False Then Return False
 
-	Local $dW = $size[0] - $w, $dH = $size[1] -$h
+	Local $dW = $size[0] / $w, $dH = $size[1] / $h, $newW = $w, $newH = $h
 	Local $hResult, $hResultTmp
 
-	If $dW > $dH And $dw > 0 Then
-		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
-	ElseIf $dW < $dH And $dw > 0 Then
-		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
-	ElseIf $dW > $dH And $dw < 0 Then
-		$hResultTmp = _GDIPlus_ImageResize($bitmap, $size[0] * ($h / $size[1]), $h)
-	ElseIf $dW < $dH And $dw < 0 Then
-		$hResultTmp = _GDIPlus_ImageResize($bitmap, $w, $size[1] * ($w / $size[0]))
+	If $dw < $dH Then
+		$newH = Int($size[1] * ($w / $size[0]))
 	Else
-		$hResultTmp = _GDIPlus_ImageResize($bitmap, $w, $h)
+		$newW = Int($size[0] * ($h / $size[1]))
 	EndIf
 
-	$hResult = $crop ? _GDIPlus_BitmapCloneArea($hResultTmp, 0, 0, $w, $h) : _GDIPlus_ImageClone($hResultTmp)
+	$hResultTmp = _GDIPlus_ImageResize($bitmap, $newW ,$newH)
+
+	$hResult = $crop ? _GDIPlus_BitmapCloneArea($hResultTmp, ($newW - $w) / 2, ($newH - $h) / 2, $w, $h) : _GDIPlus_ImageClone($hResultTmp)
 	_GDIPlus_ImageDispose($bitmap)
 	_GDIPlus_ImageDispose($hResultTmp)
 
